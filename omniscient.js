@@ -27,13 +27,24 @@ function start(prophet) {
   let waitingForCore = false;
 
   // ---- elements
-  const wrap = el("span", { style: "display:inline-flex;align-items:center;margin-left:6px;position:relative" });
+  // A round icon button laid over the footer, just left of the theme button:
+  // it takes no room, so the version line never wraps or moves.
+  if (!document.getElementById("prophet-updates-style")) {
+    document.head.append(el("style", { id: "prophet-updates-style" },
+      "@keyframes prophet-updates-spin{to{transform:rotate(360deg)}}" +
+      ".prophet-updates-btn{display:grid;place-items:center;width:20px;height:20px;border-radius:999px;border:0;padding:0;cursor:pointer;color:#fff;background:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.18)}" +
+      ".prophet-updates-btn:hover{background:#1d4ed8}" +
+      ".prophet-updates-btn.failed{background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.18)}" +
+      ".prophet-updates-btn.busy svg{animation:prophet-updates-spin 1s linear infinite}"));
+  }
+  const wrap = el("span", { style: "position:absolute;top:50%;right:calc(1.25rem + 2rem + 6px);transform:translateY(-50%);display:flex" });
   const button = el("button", {
     type: "button",
-    class: "btn btn-primary btn-sm",
-    style: "padding:1px 8px;font-size:11px;line-height:16px;min-height:0;height:auto;display:none",
+    class: "prophet-updates-btn",
+    style: "display:none",
     "aria-haspopup": "dialog",
-  }, "Update");
+    "aria-label": "Update Prophet",
+  });
   wrap.append(button);
 
   const pop = el("div", {
@@ -49,9 +60,12 @@ function start(prophet) {
 
   // ---- placing the button by the version
   const place = () => {
-    const health = document.getElementById("health");
-    if (health && wrap.previousElementSibling !== health) health.after(wrap);
-    return !!health;
+    const footer = document.getElementById("health")?.parentElement;
+    if (footer && wrap.parentElement !== footer) {
+      if (getComputedStyle(footer).position === "static") footer.style.position = "relative";
+      footer.append(wrap);
+    }
+    return !!footer;
   };
   if (!place()) {
     const obs = new MutationObserver(() => { if (place()) obs.disconnect(); });
@@ -153,15 +167,12 @@ function start(prophet) {
     const st = data?.update?.state;
     const show = busy() || st === "failed" || (data && !data.error && data.behind > 0) || waitingForCore;
     button.style.display = show ? "" : "none";
-    if (busy() || waitingForCore) {
-      button.textContent = "Updating…";
-      button.title = data?.update?.step || "Updating Prophet";
-    } else if (st === "failed") {
-      button.textContent = "Update failed";
-      button.title = data.update.error || "";
-    } else {
-      button.textContent = "Update";
-      button.title = "";
+    const kind = busy() || waitingForCore ? "busy" : st === "failed" ? "failed" : "ready";
+    if (button.dataset.kind !== kind) {
+      button.dataset.kind = kind;
+      button.className = `prophet-updates-btn ${kind}`;
+      button.setAttribute("aria-label", { busy: "Updating Prophet", failed: "Prophet update failed", ready: "Update Prophet" }[kind]);
+      button.replaceChildren(icon(kind));
     }
     if (pop.style.display === "block") render();
   }
@@ -262,6 +273,26 @@ function tidy(md) {
 
 function line(label, value) {
   return el("div", { class: "text-sm", style: "opacity:.75;margin-top:2px" }, `${label}: ${value}`);
+}
+
+// The button's icon: an arrow down to a line (ready), a circle arrow (busy), "!" (failed).
+function icon(kind) {
+  const paths = {
+    ready: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+    busy: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/>',
+    failed: '<path d="M12 6v8"/><path d="M12 18h.01"/>',
+  };
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2.4");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.innerHTML = paths[kind];
+  return svg;
 }
 
 function logo() {
