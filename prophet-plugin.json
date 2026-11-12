@@ -1,7 +1,7 @@
 {
   "id": "ulichaizer",
   "name": "Prophet updates",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "api_version": 1,
   "description": "Checks GitHub for a newer Prophet, shows an Update button by the version with the merged PRs, and updates and restarts the core on a click.",
   "homepage": "https://github.com/kotekhizanov/prophet-ulichaizer",

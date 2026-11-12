@@ -130,7 +130,13 @@ function start(prophet) {
   }
 
   // While an update runs: follow the server, then the core, then reload.
+  let following = false;
   async function follow() {
+    if (following) return;
+    following = true;
+    try { await followLoop(); } finally { following = false; }
+  }
+  async function followLoop() {
     const deadline = Date.now() + 15 * 60 * 1000;
     while (Date.now() < deadline) {
       await sleep(1500);
@@ -155,8 +161,15 @@ function start(prophet) {
     } catch { return false; }
   }
 
+  // Reload the page once the updated core answers, so it runs the new Omniscient.
+  let reloading = false;
   async function reloadWhenUp() {
-    for (let i = 0; i < 120 && !(await coreUp()); i++) await sleep(1000);
+    if (reloading) return;
+    reloading = true;
+    waitingForCore = true;
+    paint();
+    for (let i = 0; i < 180 && !(await coreUp()); i++) await sleep(1000);
+    await sleep(500);
     location.reload();
   }
 
@@ -242,8 +255,25 @@ function start(prophet) {
     if (Date.now() - lastCheck >= minutes * 60 * 1000) refresh(true);
   }, 60 * 1000);
 
+  // Every tab watches the server: an update started anywhere (another tab, another
+  // browser) is followed here too, and a page still on the old version reloads.
+  let seenUpdate;
+  setInterval(async () => {
+    if (following || reloading) return;
+    let s;
+    try { s = await call("/status"); } catch { return; }
+    data = s;
+    serverDown = false;
+    paint();
+    const u = s.update || {};
+    if (seenUpdate === undefined) seenUpdate = u.state === "done" ? u.started_at : null; // the server was away at load
+    if (["running", "restarting"].includes(u.state)) follow();
+    else if (u.state === "done" && u.started_at && u.started_at !== seenUpdate) reloadWhenUp();
+  }, 5000);
+
   (async () => {
     await refresh(false);
+    seenUpdate = data?.update?.started_at; // an update finished before this page loaded is not news
     if (busy()) follow();
     else if (!data?.checked_at || Date.now() - lastCheck >= minutes * 60 * 1000) refresh(true);
   })();

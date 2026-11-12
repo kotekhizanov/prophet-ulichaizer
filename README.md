@@ -15,7 +15,8 @@ A Prophet plugin that keeps the Mac's Prophet checkout up to date.
   a preview starts it) gets a fresh worker, and whatever started it keeps it;
   otherwise the core on the port is stopped and started again in the
   background, logging to `~/.local/share/prophet-updater/core.log`.
-  Omniscient reloads when the core answers `/health` again.
+  Every open Omniscient tab follows the update and reloads by itself when the
+  updated core answers `/health`.
 
 An update refuses a checkout with uncommitted changes to tracked files.
 
