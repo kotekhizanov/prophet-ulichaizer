@@ -1,0 +1,24 @@
+{
+  "id": "ulichaizer",
+  "name": "Prophet updates",
+  "version": "0.1.0",
+  "api_version": 1,
+  "description": "Checks GitHub for a newer Prophet, shows an Update button by the version with the merged PRs, and updates and restarts the core on a click.",
+  "homepage": "https://github.com/kotekhizanov/prophet-ulichaizer",
+  "script": "/omniscient.js",
+  "server": "http://127.0.0.1:8797",
+  "run": {"command": "python3", "args": ["-u", "server.py"]},
+  "settings": {
+    "type": "object",
+    "properties": {
+      "check_minutes": {
+        "type": "integer",
+        "title": "Check for updates every, minutes",
+        "description": "How often to look for a newer Prophet on GitHub.",
+        "minimum": 5,
+        "maximum": 10080,
+        "default": 60
+      }
+    }
+  }
+}
