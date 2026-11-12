@@ -218,6 +218,43 @@ def dev_db_url() -> str:
     return m.group(1) if m else "postgresql://postgres:postgres@localhost:5432/prophet"
 
 
+def proc_cwd(pid: int) -> str:
+    out = run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], check=False)
+    return next((x[1:] for x in out.splitlines() if x.startswith("n")), "")
+
+
+def running_core() -> dict | None:
+    """The core on its port: the uvicorn that listens, whether it reloads, its host and database."""
+    for pid in listening_pids(core_port()):
+        cmd = proc(pid, "command")
+        if "uvicorn" not in cmd:
+            continue
+        env = run(["ps", "eww", "-o", "command=", "-p", str(pid)], check=False)
+        db = re.search(r"\bPROPHET_DATABASE_URL=(\S+)", env)
+        host = re.search(r"--host[ =](\S+)", cmd)
+        return {
+            "pid": pid, "reload": "--reload" in cmd,
+            "in_repo": Path(proc_cwd(pid) or "/").resolve() == REPO.resolve(),
+            "host": host.group(1) if host else "127.0.0.1",
+            "db": db.group(1) if db else None,
+        }  # fmt: skip
+    return None
+
+
+def worker_pids(reloader: int) -> set[int]:
+    """The reloader's worker processes (not multiprocessing's resource tracker)."""
+    out = run(["pgrep", "-P", str(reloader)], check=False)
+    return {int(x) for x in out.split() if "resource_tracker" not in proc(int(x), "command")}
+
+
+def compose_files() -> list[str]:
+    """compose.dev.yaml, and the Mac's own compose.local.yaml override when there is one."""
+    files = ["-f", "compose.dev.yaml"]
+    if (REPO / "compose.local.yaml").exists():
+        files += ["-f", "compose.local.yaml"]
+    return files
+
+
 def stop_core() -> str:
     """Stop the core on its port (and the `make dev` around it); its --host, to start it the same way."""
     host = "127.0.0.1"
@@ -257,17 +294,38 @@ def stop_core() -> str:
     return host
 
 
-def start_core(host: str) -> None:
+def start_core(host: str, db: str) -> None:
+    """The core as `make dev` runs it (the database and migrations are done already)."""
     DATA.mkdir(parents=True, exist_ok=True)
     out = open(CORE_LOG, "ab")
-    out.write(f"\n==== {datetime.now().isoformat()} make dev (Prophet updates)\n".encode())
+    out.write(f"\n==== {datetime.now().isoformat()} core started by Prophet updates\n".encode())
     out.flush()
+    args = ["uv", "run", "uvicorn", "--factory", "prophet.dev:app", "--reload",
+            "--timeout-graceful-shutdown", "3", "--host", host, "--port", str(core_port())]  # fmt: skip
     subprocess.Popen(
-        ["make", "dev", f"HOST={host}"], cwd=REPO, env=tool_env(),
+        args, cwd=REPO, env={**tool_env(), "PROPHET_DATABASE_URL": db},
         stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
         start_new_session=True,  # outlives this server and the node
     )  # fmt: skip
-    note(f"Started `make dev HOST={host}`; its log: {CORE_LOG}")
+    note(f"Started the core on {host}:{core_port()}; its log: {CORE_LOG}")
+
+
+def restart_core(core: dict | None, db: str) -> None:
+    """A core that reloads from this checkout gets a fresh worker (its reloader stays, so
+    whatever started it, a terminal or a preview, keeps it); any other is stopped and
+    started again from this checkout."""
+    if core and core["reload"] and core["in_repo"]:
+        before = worker_pids(core["pid"])
+        note(f"Reloading the core's worker (uvicorn --reload, pid {core['pid']})")
+        (REPO / "src/prophet/dev.py").touch()
+        for _ in range(60):
+            now = worker_pids(core["pid"])
+            if now and not (now & before):
+                return
+            time.sleep(0.5)
+        note("The worker did not change in 30 s; stopping and starting the core instead")
+    host = stop_core()
+    start_core(core["host"] if core else host, db)
 
 
 def core_healthy() -> bool:
@@ -289,16 +347,17 @@ def do_update() -> None:
         note(git("pull", "--ff-only", timeout=300)[-1500:])
         step("uv sync")
         note(run(["uv", "sync"], timeout=600)[-800:])
-        step("Database (make db)")
-        run(["make", "db"], timeout=300)
+        core = running_core()
+        db = (core or {}).get("db") or dev_db_url()
+        step("Database (docker compose " + " ".join(compose_files()[1::2]) + ")")
+        run(["docker", "compose", *compose_files(), "up", "-d", "--wait"], timeout=300)
         step("Migrations")
-        env = {**tool_env(), "PROPHET_DATABASE_URL": dev_db_url()}
+        env = {**tool_env(), "PROPHET_DATABASE_URL": db}
         note(run(["uv", "run", "prophet", "migrate"], timeout=300, env=env)[-1500:])
         step("Restarting the core")
         with state_lock:
             update["state"] = "restarting"
-        host = stop_core()
-        start_core(host)
+        restart_core(core, db)
         step("Waiting for the core")
         for _ in range(HEALTH_WAIT):
             if core_healthy():

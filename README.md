@@ -7,11 +7,15 @@ A Prophet plugin that keeps the Mac's Prophet checkout up to date.
 - If it has, an **Update** button appears next to the version at the bottom
   left of Omniscient. Hover it for the window with the current and latest
   versions and the release notes: the merged pull requests the checkout lacks.
-- **Update** runs, in the checkout: `git pull --ff-only`, `uv sync`,
-  `make db`, `uv run prophet migrate`, then stops the running core (and the
-  `make dev` around it) and starts `make dev` again in the background, with
-  its log in `~/.local/share/prophet-updater/core.log`. Omniscient reloads
-  when the core answers `/health` again.
+- **Update** runs, in the checkout: `git pull --ff-only`, `uv sync`, the
+  database (`docker compose -f compose.dev.yaml [-f compose.local.yaml] up -d
+  --wait`), `uv run prophet migrate` against the running core's
+  `PROPHET_DATABASE_URL` (else the Makefile's `DEV_DB`), then restarts the
+  core: a core running `uvicorn --reload` from the checkout (as `make dev` or
+  a preview starts it) gets a fresh worker, and whatever started it keeps it;
+  otherwise the core on the port is stopped and started again in the
+  background, logging to `~/.local/share/prophet-updater/core.log`.
+  Omniscient reloads when the core answers `/health` again.
 
 An update refuses a checkout with uncommitted changes to tracked files.
 
